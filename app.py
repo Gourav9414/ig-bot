@@ -44,7 +44,7 @@ def webhook_event():
                     try:
                         # Generate AI response using Gemini
                         response = client.models.generate_content(
-                            model="gemini-2.5-flash",
+                            model="gemini-2.0-flash",
                             contents=message_text,
                         )
                         reply_text = response.text if response.text else "Sorry, I couldn't process that."
