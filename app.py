@@ -5,12 +5,10 @@ from google import genai
 
 app = Flask(__name__)
 
-# Load Environment Variables from Render
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Initialize Gemini Client
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 @app.route('/', methods=['GET'])
@@ -33,29 +31,45 @@ def verify_webhook():
 @app.route('/webhook', methods=['POST'])
 def webhook_event():
     data = request.get_json()
+    print("Incoming Webhook Data:", data)
 
-    if data.get("object") == "instagram":
-        for entry in data.get("entry", []):
-            for messaging_event in entry.get("messaging", []):
-                sender_id = messaging_event.get("sender", {}).get("id")
-                message_text = messaging_event.get("message", {}).get("text")
+    try:
+        if data.get("object") == "instagram":
+            for entry in data.get("entry", []):
+                messaging = entry.get("messaging", [])
+                if not messaging:
+                    # Sometimes Instagram sends messages under 'changes'
+                    changes = entry.get("changes", [])
+                    for change in changes:
+                        value = change.get("value", {})
+                        sender_id = value.get("sender", {}).get("id")
+                        message_text = value.get("message", {}).get("text")
+                        if sender_id and message_text:
+                            process_and_reply(sender_id, message_text)
+                
+                for messaging_event in messaging:
+                    sender_id = messaging_event.get("sender", {}).get("id")
+                    message_text = messaging_event.get("message", {}).get("text")
 
-                if sender_id and message_text:
-                    try:
-                        # Generate AI response using Gemini
-                        response = client.models.generate_content(
-                            model="gemini-flash-latest",
-                            contents=message_text,
-                        )
-                        reply_text = response.text if response.text else "Sorry, I couldn't process that."
-                    except Exception as e:
-                        print("Gemini API Error:", e)
-                        reply_text = "Sorry, I am having trouble responding right now."
-
-                    # Send reply back to Instagram DM
-                    send_instagram_message(sender_id, reply_text)
+                    if sender_id and message_text:
+                        process_and_reply(sender_id, message_text)
+    except Exception as e:
+        print("Webhook Parsing Error:", e)
 
     return "EVENT_RECEIVED", 200
+
+def process_and_reply(sender_id, message_text):
+    try:
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=message_text,
+        )
+        reply_text = response.text if response.text else "Hello!"
+    except Exception as e:
+        print("Gemini API Error:", e)
+        reply_text = "Hi there!"
+
+    send_instagram_message(sender_id, reply_text)
 
 def send_instagram_message(recipient_id, text):
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
@@ -64,7 +78,9 @@ def send_instagram_message(recipient_id, text):
         "message": {"text": text}
     }
     headers = {"Content-Type": "application/json"}
-    requests.post(url, json=payload, headers=headers)
+    res = requests.post(url, json=payload, headers=headers)
+    print("Instagram Send Response:", res.status_code, res.text)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    
